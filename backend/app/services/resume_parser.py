@@ -73,7 +73,11 @@ class FileTooLargeError(ResumeParsingError):
 # --------------------------------------------------------------------------
 
 PREVIEW_LENGTH = 1000
-SECTION_CONTENT_PREVIEW_LENGTH = 500
+# NOTE: bumped from 500 -> 4000. At 500 chars, a section with 2-3 projects
+# (or 2+ degrees, or a categorized skills list) was frequently truncated
+# mid-entry before the entity extractor ever saw it. 4000 comfortably fits
+# realistic multi-entry sections while still bounding worst-case size.
+SECTION_CONTENT_PREVIEW_LENGTH = 4000
 
 # Defense-in-depth limits. The upload endpoint already enforces a max
 # upload size, but this parser may eventually be called from other
@@ -305,6 +309,35 @@ def _match_section_header(line: str) -> str | None:
     return None
 
 
+# Headers for resume sections we don't capture as one of the 5 target
+# sections (Publications, Awards, Summary, References, etc.). We never
+# store their content anywhere — the ONLY purpose of recognizing them is
+# to stop capturing into whatever target section came directly before
+# them. Without this, e.g. a "Research Publication" block sitting right
+# after "Education" (with no target-section header in between) would
+# silently keep being appended to the Education buffer, producing bogus
+# extra education entries downstream.
+_OTHER_HEADER_RE = re.compile(
+    r"^(?:"
+    r"publications?|selected\s+publications?|research\s+publications?|"
+    r"research(?:\s+(?:work|papers?))?|papers?|articles?|published\s+works?|"
+    r"awards?|honou?rs?|achievements?|"
+    r"summary|objective|profile|about(\s+me)?|"
+    r"hobbies?|interests?|references?|"
+    r"languages?\s+known|"
+    r"volunteer(?:ing)?(?:\s+experience)?|extracurriculars?"
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def _is_other_known_header(line: str) -> bool:
+    candidate = _normalize_header_candidate(line)
+    if not candidate or len(candidate) > _MAX_HEADER_LINE_LENGTH:
+        return False
+    return bool(_OTHER_HEADER_RE.match(candidate))
+
+
 def detect_sections(text: str) -> dict[str, str | None]:
     """
     Scans cleaned text line-by-line for known section headers and captures
@@ -327,14 +360,30 @@ def detect_sections(text: str) -> dict[str, str | None]:
             current_section = header_match
             continue
 
+        if current_section and _is_other_known_header(line):
+            # A non-target section (Publications/Awards/Summary/...) has
+            # started; stop capturing into the previous target section.
+            current_section = None
+            continue
+
         if current_section:
-            stripped = line.strip()
-            if stripped:
-                buffers[current_section].append(stripped)
+            # NOTE: we intentionally keep blank lines here (previously they
+            # were dropped via `if stripped:`). Downstream entity extraction
+            # splits Projects/Education into individual entries on blank
+            # lines, and this was silently collapsing every multi-project or
+            # multi-degree section into one unsplittable block. Line content
+            # itself is still stripped of leading/trailing whitespace.
+            buffers[current_section].append(line.strip())
 
     for name, content_lines in buffers.items():
         if content_lines:
-            content = " ".join(content_lines)
+            # Join with newlines, not spaces, so line-based downstream logic
+            # (skill "Category:" prefix stripping, per-line institution
+            # detection, project-block splitting) has the structure it needs.
+            content = "\n".join(content_lines).strip()
+            # Collapse any run of 3+ blank lines back down to a single blank
+            # line, same normalization clean_text() already applies elsewhere.
+            content = _MULTI_BLANK_LINES_RE.sub("\n\n", content)
             detected[name] = content[:SECTION_CONTENT_PREVIEW_LENGTH]
 
     return detected
