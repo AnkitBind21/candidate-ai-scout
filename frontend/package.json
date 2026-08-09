@@ -41,9 +41,9 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-query": "^5.101.1",
-    "@tanstack/react-router": "^1.170.16",
-    "@tanstack/react-start": "^1.168.26",
-    "@tanstack/router-plugin": "^1.168.18",
+    "@tanstack/react-router": "1.170.18",
+    "@tanstack/react-start": "1.168.32",
+    "@tanstack/router-plugin": "1.168.23",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -51,7 +51,6 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
-    "motion": "^12.42.2",
     "react": "^19.2.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.0",
@@ -68,7 +67,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@lovable.dev/vite-tanstack-config": "^2.7.7",
+    "@lovable.dev/vite-tanstack-config": "^2.10.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -83,6 +82,6 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.0.16"
+    "vite": "^8.2.0"
   }
 }

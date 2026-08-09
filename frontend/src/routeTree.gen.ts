@@ -9,149 +9,226 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AiAnalysisRouteImport } from './routes/ai-analysis'
-import { Route as AnalyticsRouteImport } from './routes/analytics'
-import { Route as CandidatesRouteImport } from './routes/candidates'
-import { Route as JobsRouteImport } from './routes/jobs'
-import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ShellRouteImport } from './routes/_shell'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as ShellIndexRouteImport } from './routes/_shell.index'
+import { Route as ShellAnalysesRouteImport } from './routes/_shell.analyses'
+import { Route as ShellJobsRouteImport } from './routes/_shell.jobs'
+import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
+import { Route as ShellCandidatesIndexRouteImport } from './routes/_shell.candidates.index'
+import { Route as ShellCandidatesCandidateIdRouteImport } from './routes/_shell.candidates.$candidateId'
 
-const IndexRoute = IndexRouteImport.update({
+const ShellRoute = ShellRouteImport.update({
+  id: '/_shell',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => ShellRoute,
 } as any)
-const AiAnalysisRoute = AiAnalysisRouteImport.update({
-  id: '/ai-analysis',
-  path: '/ai-analysis',
-  getParentRoute: () => rootRouteImport,
+const ShellAnalysesRoute = ShellAnalysesRouteImport.update({
+  id: '/analyses',
+  path: '/analyses',
+  getParentRoute: () => ShellRoute,
 } as any)
-const AnalyticsRoute = AnalyticsRouteImport.update({
-  id: '/analytics',
-  path: '/analytics',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CandidatesRoute = CandidatesRouteImport.update({
-  id: '/candidates',
-  path: '/candidates',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const JobsRoute = JobsRouteImport.update({
+const ShellJobsRoute = ShellJobsRouteImport.update({
   id: '/jobs',
   path: '/jobs',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => ShellRoute,
 } as any)
-const SettingsRoute = SettingsRouteImport.update({
+const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => ShellRoute,
 } as any)
+const ShellCandidatesIndexRoute = ShellCandidatesIndexRouteImport.update({
+  id: '/candidates/',
+  path: '/candidates/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellCandidatesCandidateIdRoute =
+  ShellCandidatesCandidateIdRouteImport.update({
+    id: '/candidates/$candidateId',
+    path: '/candidates/$candidateId',
+    getParentRoute: () => ShellRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/ai-analysis': typeof AiAnalysisRoute
-  '/analytics': typeof AnalyticsRoute
-  '/candidates': typeof CandidatesRoute
-  '/jobs': typeof JobsRoute
-  '/settings': typeof SettingsRoute
+  '/': typeof ShellIndexRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/analyses': typeof ShellAnalysesRoute
+  '/jobs': typeof ShellJobsRoute
+  '/settings': typeof ShellSettingsRoute
+  '/candidates/$candidateId': typeof ShellCandidatesCandidateIdRoute
+  '/candidates/': typeof ShellCandidatesIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/ai-analysis': typeof AiAnalysisRoute
-  '/analytics': typeof AnalyticsRoute
-  '/candidates': typeof CandidatesRoute
-  '/jobs': typeof JobsRoute
-  '/settings': typeof SettingsRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/analyses': typeof ShellAnalysesRoute
+  '/jobs': typeof ShellJobsRoute
+  '/settings': typeof ShellSettingsRoute
+  '/': typeof ShellIndexRoute
+  '/candidates/$candidateId': typeof ShellCandidatesCandidateIdRoute
+  '/candidates': typeof ShellCandidatesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/ai-analysis': typeof AiAnalysisRoute
-  '/analytics': typeof AnalyticsRoute
-  '/candidates': typeof CandidatesRoute
-  '/jobs': typeof JobsRoute
-  '/settings': typeof SettingsRoute
+  '/_shell': typeof ShellRouteWithChildren
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/_shell/analyses': typeof ShellAnalysesRoute
+  '/_shell/jobs': typeof ShellJobsRoute
+  '/_shell/settings': typeof ShellSettingsRoute
+  '/_shell/': typeof ShellIndexRoute
+  '/_shell/candidates/$candidateId': typeof ShellCandidatesCandidateIdRoute
+  '/_shell/candidates/': typeof ShellCandidatesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/ai-analysis' | '/analytics' | '/candidates' | '/jobs' | '/settings'
-  fileRoutesByTo: FileRoutesByTo
-  to:
-    '/' | '/ai-analysis' | '/analytics' | '/candidates' | '/jobs' | '/settings'
-  id:
-    | '__root__'
     | '/'
-    | '/ai-analysis'
-    | '/analytics'
-    | '/candidates'
+    | '/login'
+    | '/signup'
+    | '/analyses'
     | '/jobs'
     | '/settings'
+    | '/candidates/$candidateId'
+    | '/candidates/'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/login'
+    | '/signup'
+    | '/analyses'
+    | '/jobs'
+    | '/settings'
+    | '/'
+    | '/candidates/$candidateId'
+    | '/candidates'
+  id:
+    | '__root__'
+    | '/_shell'
+    | '/login'
+    | '/signup'
+    | '/_shell/analyses'
+    | '/_shell/jobs'
+    | '/_shell/settings'
+    | '/_shell/'
+    | '/_shell/candidates/$candidateId'
+    | '/_shell/candidates/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  AiAnalysisRoute: typeof AiAnalysisRoute
-  AnalyticsRoute: typeof AnalyticsRoute
-  CandidatesRoute: typeof CandidatesRoute
-  JobsRoute: typeof JobsRoute
-  SettingsRoute: typeof SettingsRoute
+  ShellRoute: typeof ShellRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  SignupRoute: typeof SignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_shell': {
+      id: '/_shell'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof ShellRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_shell/': {
+      id: '/_shell/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellIndexRouteImport
+      parentRoute: typeof ShellRoute
     }
-    '/ai-analysis': {
-      id: '/ai-analysis'
-      path: '/ai-analysis'
-      fullPath: '/ai-analysis'
-      preLoaderRoute: typeof AiAnalysisRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_shell/analyses': {
+      id: '/_shell/analyses'
+      path: '/analyses'
+      fullPath: '/analyses'
+      preLoaderRoute: typeof ShellAnalysesRouteImport
+      parentRoute: typeof ShellRoute
     }
-    '/analytics': {
-      id: '/analytics'
-      path: '/analytics'
-      fullPath: '/analytics'
-      preLoaderRoute: typeof AnalyticsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/candidates': {
-      id: '/candidates'
-      path: '/candidates'
-      fullPath: '/candidates'
-      preLoaderRoute: typeof CandidatesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/jobs': {
-      id: '/jobs'
+    '/_shell/jobs': {
+      id: '/_shell/jobs'
       path: '/jobs'
       fullPath: '/jobs'
-      preLoaderRoute: typeof JobsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellJobsRouteImport
+      parentRoute: typeof ShellRoute
     }
-    '/settings': {
-      id: '/settings'
+    '/_shell/settings': {
+      id: '/_shell/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/candidates/': {
+      id: '/_shell/candidates/'
+      path: '/candidates'
+      fullPath: '/candidates/'
+      preLoaderRoute: typeof ShellCandidatesIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/candidates/$candidateId': {
+      id: '/_shell/candidates/$candidateId'
+      path: '/candidates/$candidateId'
+      fullPath: '/candidates/$candidateId'
+      preLoaderRoute: typeof ShellCandidatesCandidateIdRouteImport
+      parentRoute: typeof ShellRoute
     }
   }
 }
 
+interface ShellRouteChildren {
+  ShellAnalysesRoute: typeof ShellAnalysesRoute
+  ShellJobsRoute: typeof ShellJobsRoute
+  ShellSettingsRoute: typeof ShellSettingsRoute
+  ShellIndexRoute: typeof ShellIndexRoute
+  ShellCandidatesCandidateIdRoute: typeof ShellCandidatesCandidateIdRoute
+  ShellCandidatesIndexRoute: typeof ShellCandidatesIndexRoute
+}
+
+const ShellRouteChildren: ShellRouteChildren = {
+  ShellAnalysesRoute: ShellAnalysesRoute,
+  ShellJobsRoute: ShellJobsRoute,
+  ShellSettingsRoute: ShellSettingsRoute,
+  ShellIndexRoute: ShellIndexRoute,
+  ShellCandidatesCandidateIdRoute: ShellCandidatesCandidateIdRoute,
+  ShellCandidatesIndexRoute: ShellCandidatesIndexRoute,
+}
+
+const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AiAnalysisRoute: AiAnalysisRoute,
-  AnalyticsRoute: AnalyticsRoute,
-  CandidatesRoute: CandidatesRoute,
-  JobsRoute: JobsRoute,
-  SettingsRoute: SettingsRoute,
+  ShellRoute: ShellRouteWithChildren,
+  LoginRoute: LoginRoute,
+  SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

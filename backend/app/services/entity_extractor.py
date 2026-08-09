@@ -132,6 +132,13 @@ class ProjectEntry:
     description: str | None = None
     technologies: list[str] = field(default_factory=list)
     url: str | None = None
+    # Link labels mentioned in the project block (e.g. "GitHub", "Live
+    # Demo", "Video Demo") that don't have (or aren't paired with) an
+    # actual URL right there in the text. We never invent a URL for
+    # these — they're recorded purely as labels. When a real URL IS
+    # present alongside a label (e.g. "GitHub: github.com/user/project"),
+    # both `url` and this label are populated.
+    links: list[str] = field(default_factory=list)
     raw: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -140,6 +147,7 @@ class ProjectEntry:
             "description": self.description,
             "technologies": self.technologies,
             "url": self.url,
+            "links": self.links,
             "raw": self.raw,
         }
 
@@ -283,7 +291,7 @@ _DEGREE_RE = re.compile(
 )
 
 _GPA_RE = re.compile(
-    r"(?:GPA|CGPA|Grade\s+Point\s+Average?|Score)\s*:?\s*(\d+\.?\d*)\s*/\s*(\d+\.?\d*)",
+    r"(?:GPA|CGPA|CGPI|Grade\s+Point\s+Average?|Score)\s*:?\s*(\d+\.?\d*)\s*/\s*(\d+\.?\d*)",
     re.IGNORECASE,
 )
 
@@ -680,19 +688,175 @@ def _extract_institution(block: str, lines: list[str], field_of_study: str | Non
     return lines[0]
 
 
+# Splits "<degree/field> – <institution>" on an en dash (or em dash) with
+# surrounding spaces. Deliberately NOT a plain hyphen, so abbreviations
+# like "L.U.J." or "M.V." inside an institution name are never mistaken
+# for the degree/institution separator.
+_EDU_EN_DASH_SPLIT_RE = re.compile(r"\s[–—]\s")
+
+# Self-contained "line has its own year range" check used only to decide
+# whether an Education block should be split per-line (see
+# _split_education_blocks). Deliberately independent of the shared
+# _DATE_RE/_YEAR_ONLY_RE machinery used elsewhere in this file, so this
+# fix stays scoped to Education and doesn't change Experience/other date
+# handling.
+_EDU_YEAR_RANGE_LINE_RE = re.compile(
+    r"\b(?:19|20)\d{2}\b\s*[-–—]\s*(?:\b(?:19|20)\d{2}\b|present|current)",
+    re.IGNORECASE,
+)
+
+
+# Headers that mark the end of the Education section. This is deliberately
+# independent of resume_parser.py's own section detection (which is not
+# being modified here) — it's a defensive second check, entirely local to
+# this module, that truncates the Education text at the first line that
+# looks like the start of another section. This also covers combined
+# headers like "ACHIEVEMENTS & CERTIFICATIONS" / "ACHIEVEMENTS AND
+# CERTIFICATIONS" that a plain single-word header match would miss.
+_EDU_STOP_HEADER_RE = re.compile(
+    r"^(?:experience|projects?|skills?|publications?|certifications?|achievements?)"
+    r"(?:\s*(?:&|and)\s*(?:certifications?|achievements?))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _truncate_at_next_section(section_text: str) -> str:
+    """Cuts the Education text off at the first line that looks like the
+    start of another section, so an entry never absorbs unrelated content
+    from EXPERIENCE / PROJECTS / SKILLS / PUBLICATIONS / CERTIFICATIONS /
+    ACHIEVEMENTS (including combined "ACHIEVEMENTS & CERTIFICATIONS" /
+    "ACHIEVEMENTS AND CERTIFICATIONS" style headers)."""
+    lines = section_text.splitlines()
+    for i, line in enumerate(lines):
+        # Normalize away stray punctuation/bullets so "ACHIEVEMENTS:" or
+        # "- Achievements" still matches the plain header pattern.
+        normalized = re.sub(r"[^A-Za-z&\s]", "", line).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+        if normalized and _EDU_STOP_HEADER_RE.match(normalized):
+            return "\n".join(lines[:i])
+    return section_text
+
+
+def _split_education_blocks(section_text: str) -> list[str]:
+    """
+    Splits the Education section into one block per degree entry.
+
+    Some resumes list multiple degrees (e.g. UG / HSC / SSC) as consecutive
+    lines with NO blank line between them, each line being fully
+    self-contained: "<degree> – <institution> | <gpa/%> | <years>". Treating
+    that as a single ``_split_into_blocks`` block would merge all degrees
+    into one bogus entry. Detect this case — every non-empty line in the
+    block independently contains its own year range — and split it into
+    one block per line; otherwise keep the traditional blank-line block
+    (institution and degree/dates spread across multiple lines).
+    """
+    blocks = _split_into_blocks(section_text)
+    final_blocks: list[str] = []
+
+    for block in blocks:
+        lines = [ln for ln in block.splitlines() if ln.strip()]
+        if len(lines) > 1 and all(_EDU_YEAR_RANGE_LINE_RE.search(ln) for ln in lines):
+            final_blocks.extend(lines)
+        else:
+            final_blocks.append(block)
+
+    return final_blocks
+
+
+def _parse_degree_and_field(text: str) -> tuple[str | None, str | None]:
+    """
+    Extracts (degree, field_of_study) from a line or block such as:
+        "Bachelor of Science in Information Technology"
+        "B.Sc. Information Technology"
+
+    _DEGREE_RE's "Bachelor/Master (?:of <subject>)?" alternative is
+    written to also match multi-word subjects (e.g. "of Science"), and
+    since a plain "\\w+(?:\\s+\\w+)*" doesn't know where the subject ends,
+    it will happily keep consuming " in Information Technology" as well —
+    turning the whole phrase into one giant "degree" with no field left
+    over. Splitting on the literal word " in " FIRST, then only running
+    _DEGREE_RE against the text before it, sidesteps that entirely.
+    """
+    in_split = re.split(r"\s+in\s+", text, maxsplit=1, flags=re.IGNORECASE)
+
+    if len(in_split) == 2:
+        left, right = in_split[0].strip(), in_split[1].strip()
+        if _DEGREE_RE.search(left):
+            degree = _strip_trailing_noise(left)
+            field = _strip_trailing_noise(right)
+            # Keep the field of study reasonably short — a full sentence
+            # ending up here (rather than a genuine field name) means the
+            # line wasn't actually a degree/field line to begin with.
+            field = field if field and len(field) < 80 else None
+            return degree or None, field
+
+    # No " in " connector — fall back to the previous same-line remainder
+    # heuristic ("B.Sc. Information Technology", "B.Tech Computer Science").
+    degree_match = _DEGREE_RE.search(text)
+    if not degree_match:
+        return None, None
+
+    degree = degree_match.group(0).strip()
+    end_pos = degree_match.end()
+    if end_pos < len(text) and text[end_pos] == ".":
+        degree += "."
+        end_pos += 1
+
+    remainder = text[end_pos:].strip()
+    remainder = re.sub(r"\n.*", "", remainder, flags=re.DOTALL)  # same line only
+    remainder = re.split(r"\||(?=\d{4})", remainder, maxsplit=1)[0].strip()
+    remainder = re.sub(r"^(?:in|of)\s+", "", remainder, flags=re.IGNORECASE)
+    remainder = _strip_trailing_noise(remainder)
+    field = remainder if remainder and len(remainder) < 80 else None
+    return degree, field
+
+
 def _extract_education(section_text: str) -> list[EducationEntry]:
     """
     Splits the Education section into per-institution blocks and extracts:
-    - Institution name (spaCy ORG or first significant line)
+    - Institution name
     - Degree keyword
     - Field of study (text following the degree keyword)
     - Date range
-    - GPA / CGPA
+    - GPA / CGPA / CGPI (or a bare percentage, e.g. "55.17%", as a fallback)
+
+    Stops immediately at the start of any other section (EXPERIENCE,
+    PROJECTS, SKILLS, PUBLICATIONS, CERTIFICATIONS, ACHIEVEMENTS, or a
+    combined "ACHIEVEMENTS & CERTIFICATIONS" style header) — see
+    ``_truncate_at_next_section``.
+
+    Two Education line formats are handled:
+
+    1. Pipe-delimited, one-degree-per-line, entirely on a SINGLE line
+       (the common case for Indian resumes listing UG/HSC/SSC on
+       consecutive lines with no blank line between them), e.g.:
+           "B.Sc. Information Technology – Sheth L.U.J. & Sir M.V.
+            College, Mumbai University | CGPA: 9.48/10 | 2023–2026"
+       Each such line is first split into its own block (see
+       ``_split_education_blocks``), then split again on the en dash into
+       a "degree + field" side and an "institution" side — this is what
+       keeps the institution from ending up as the entire raw line.
+    2. Genuine multi-line blocks, where degree/field, dates, institution,
+       and GPA each sit on their own line, e.g.:
+           "Bachelor of Science in Information Technology
+            2023 – Present
+            Seth L. U. J. College of Arts & Sir M. V. College of Science
+            and Commerce
+            CGPI: 8.92/10"
+       Here the institution is found via a keyword line, and the degree
+       line is split on " in " *before* running the degree regex, since
+       ``_DEGREE_RE``'s "Bachelor ... of <subject>" alternative is greedy
+       enough to otherwise swallow "in Information Technology" as part of
+       the degree itself.
     """
     if not section_text:
         return []
 
-    blocks = _split_into_blocks(section_text)
+    section_text = _truncate_at_next_section(section_text)
+    if not section_text.strip():
+        return []
+
+    blocks = _split_education_blocks(section_text)
     entries: list[EducationEntry] = []
 
     for block in blocks:
@@ -700,46 +864,98 @@ def _extract_education(section_text: str) -> list[EducationEntry]:
         if not lines:
             continue
 
-        # Degree
-        degree_match = _DEGREE_RE.search(block)
-        degree_str = degree_match.group(0).strip() if degree_match else None
-
-        # Field of study — text that follows the degree keyword on the same line
+        degree_str: str | None = None
         field_of_study: str | None = None
-        if degree_match:
-            after_degree = block[degree_match.end():].strip()
-            # Take text up to the first newline or date pattern
-            fos_candidate = re.split(r"\n|(?=\d{4})", after_degree, maxsplit=1)[0].strip()
-            # Strip a leading "in " / "of " connector word only — NOT a
-            # character class. The previous version, `[\s,in\s]`, matched
-            # any of the individual characters {whitespace, ',', 'i', 'n'}
-            # rather than the literal word "in ", so it kept eating into
-            # the start of "Information" (which itself starts with "In")
-            # and produced "formation Technology" instead of "Information
-            # Technology".
-            fos_candidate = re.sub(r"^(?:in|of)\s+", "", fos_candidate, flags=re.IGNORECASE)
-            fos_candidate = _strip_trailing_noise(fos_candidate)
-            if fos_candidate and len(fos_candidate) < 80:
-                field_of_study = fos_candidate
+        institution: str | None = None
 
-        # Dates
+        if len(lines) == 1:
+            # Format 1 — a single, self-contained pipe-delimited line.
+            # A pipe-delimited line typically looks like:
+            #   "<degree + field> – <institution> | <gpa/%> | <years>"
+            # Isolate the first ("main") segment before any trailing
+            # metadata (GPA, percentage, year range) on the same line.
+            pipe_segments = [seg.strip() for seg in block.split("|")]
+            main_segment = pipe_segments[0] if pipe_segments else block
+
+            dash_parts = _EDU_EN_DASH_SPLIT_RE.split(main_segment, maxsplit=1)
+
+            if len(dash_parts) == 2:
+                left, right = dash_parts[0].strip(), dash_parts[1].strip()
+                institution = _strip_trailing_noise(right)
+
+                degree_match = _DEGREE_RE.search(left)
+                if degree_match:
+                    degree_str = degree_match.group(0).strip()
+                    end_pos = degree_match.end()
+                    # _DEGREE_RE's trailing \b can't match between two
+                    # non-word characters (e.g. "." followed by a
+                    # space), so it silently drops a real trailing
+                    # period like the one in "B.Sc.". Restore it here
+                    # rather than touching the shared regex (keeps this
+                    # fix scoped to Education).
+                    if end_pos < len(left) and left[end_pos] == ".":
+                        degree_str += "."
+                        end_pos += 1
+                    remainder = left[end_pos:].strip()
+                    remainder = re.sub(r"^(?:in|of)\s+", "", remainder, flags=re.IGNORECASE)
+                    remainder = _strip_trailing_noise(remainder)
+                    if remainder:
+                        field_of_study = remainder
+                else:
+                    # No recognizable degree keyword (e.g. "HSC", "SSC")
+                    # — the left side itself is the degree label.
+                    degree_str = _strip_trailing_noise(left) or None
+            else:
+                # No en-dash on this single line — fall back to the
+                # whole-block heuristics used for Format 2 below.
+                degree_str, field_of_study = _parse_degree_and_field(block)
+                institution = _extract_institution(block, lines, field_of_study)
+        else:
+            # Format 2 — genuine multi-line block: institution, degree,
+            # dates, and GPA typically each sit on their own line.
+            institution_line = next(
+                (
+                    ln for ln in lines
+                    if _INSTITUTION_KEYWORDS_RE.search(ln) and not _DEGREE_RE.fullmatch(ln)
+                ),
+                None,
+            )
+            institution = _strip_trailing_noise(institution_line) if institution_line else None
+
+            for ln in lines:
+                if ln == institution_line:
+                    continue
+                degree_str, field_of_study = _parse_degree_and_field(ln)
+                if degree_str:
+                    break
+
+            if not institution:
+                institution = _extract_institution(block, lines, field_of_study)
+
+        # Dates — search the whole block so a trailing "| 2023–2026"
+        # pipe segment, or a date on its own line, is still found.
         start_year, end_year, _ = _extract_date_range(block)
 
-        # GPA
+        # GPA — explicit "GPA:"/"CGPA:"/"CGPI:" fraction first; fall back
+        # to a bare percentage (e.g. "55.17%"), common for HSC/SSC-style
+        # entries that don't use a GPA-style score.
         gpa_str: str | None = None
         gpa_m = _GPA_RE.search(block)
         if gpa_m:
             gpa_str = f"{gpa_m.group(1)}/{gpa_m.group(2)}"
+        else:
+            pct_m = re.search(r"\b(\d{1,3}(?:\.\d+)?)\s*%", block)
+            if pct_m:
+                gpa_str = f"{pct_m.group(1)}%"
 
-        # Institution — keyword heuristic first, spaCy ORG as fallback
-        # (see _extract_institution docstring for why the order matters).
-        institution = _extract_institution(block, lines, field_of_study)
+        if not institution:
+            institution = lines[0]
 
         entries.append(
             EducationEntry(
                 institution=institution,
                 degree=degree_str,
-                field_of_study=field_of_study if field_of_study else None,
+                field_of_study=field_of_study,
                 start_year=start_year,
                 end_year=end_year,
                 gpa=gpa_str,
@@ -829,9 +1045,77 @@ def _extract_experience(section_text: str) -> list[ExperienceEntry]:
 # --------------------------------------------------------------------------
 
 _PROJECT_TECH_SECTION_RE = re.compile(
-    r"^\s*(?:tech(?:nologies)?|tech\s*stack|stack|tools?|built\s+with|using|languages?)\s*:\s*",
+    r"^\s*(?:[-•·▪]\s*)?"  # optional leading bullet (from normalized "- " or a raw bullet glyph)
+    r"(?:tech(?:nologies)?|tech\s*stack|stack|tools?|built\s+with|using|languages?)"
+    r"\s*[:\-\u2013\u2014]\s*",  # separator: colon, hyphen, en dash, or em dash
     re.IGNORECASE,
 )
+
+# Link/demo labels that often ride on the SAME pipe-delimited line as the
+# real tech stack, e.g. "Tech Stack: React, Node.js | Project: GitHub |
+# Live Demo | Video Demo" — these are metadata about where to find the
+# project, never actual technologies, and must be filtered out of the
+# technologies list (Issue: "Exclude metadata such as Project: GitHub,
+# Live Demo, Video Demo").
+_PROJECT_METADATA_TOKEN_RE = re.compile(
+    r"^(?:project|github|gitlab|bitbucket|live\s*demo|video\s*demo|demo|"
+    r"preview|portfolio|source\s*code|repo(?:sitory)?|live\s*(?:site|link)?|"
+    r"website)\s*:?\s*(?:github|gitlab|bitbucket)?$",
+    re.IGNORECASE,
+)
+
+
+def _is_project_metadata_token(token: str) -> bool:
+    return bool(_PROJECT_METADATA_TOKEN_RE.match(token.strip()))
+
+
+# Canonical display form for each recognized link-label keyword.
+_PROJECT_LINK_LABEL_CANONICAL = {
+    "github": "GitHub",
+    "gitlab": "GitLab",
+    "bitbucket": "Bitbucket",
+    "live demo": "Live Demo",
+    "video demo": "Video Demo",
+    "demo": "Demo",
+    "portfolio": "Portfolio",
+    "source code": "Source Code",
+    "repository": "Repository",
+    "repo": "Repository",
+    "live site": "Live Site",
+    "live link": "Live Link",
+    "website": "Website",
+    "preview": "Preview",
+}
+
+_PROJECT_LINK_LABEL_RE = re.compile(
+    r"\b(github|gitlab|bitbucket|live\s*demo|video\s*demo|demo|portfolio|"
+    r"source\s*code|repo(?:sitory)?|live\s*site|live\s*link|website|preview)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_project_links(block: str) -> list[str]:
+    """
+    Finds link-LABEL mentions (GitHub / Live Demo / Video Demo / Portfolio /
+    etc.) anywhere in a project block and records them in `links`, WITHOUT
+    inventing any URL (Issue 4). This runs independently of URL extraction:
+    - "GitHub | Live Demo | Video Demo" (no URLs at all) -> links only.
+    - "GitHub: github.com/user/project" -> the existing URL extraction
+      (unchanged) still finds the real URL, AND "GitHub" is recorded here
+      as a link label too — both fields end up populated, matching the
+      requested behaviour exactly.
+    - "Project: GitHub" -> the label found is "GitHub" (the word "Project"
+      itself isn't a distinct link type, so it isn't recorded on its own).
+    """
+    seen: set[str] = set()
+    links: list[str] = []
+    for m in _PROJECT_LINK_LABEL_RE.finditer(block):
+        key = re.sub(r"\s+", " ", m.group(1).lower()).strip()
+        canonical = _PROJECT_LINK_LABEL_CANONICAL.get(key)
+        if canonical and canonical not in seen:
+            seen.add(canonical)
+            links.append(canonical)
+    return links
 
 
 _BARE_DOMAIN_LINK_RE = re.compile(
@@ -850,6 +1134,25 @@ def _is_link_only_line(stripped_line: str) -> bool:
     nothing else on it — these are supplementary metadata for the
     *current* project, never the start of a new one."""
     return bool(stripped_line) and bool(_LINK_ONLY_LINE_RE.match(stripped_line))
+
+
+def _is_metadata_only_line(line: str) -> bool:
+    """True if a line consists entirely of link/demo labels and/or bare
+    URLs (e.g. "GitHub | Live Demo | Video Demo", "Project: GitHub"), with
+    no real descriptive content. Such lines must never end up in
+    `description` and must never be mistaken for the start of a new
+    project (Issue 4: link labels without URLs)."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if _is_link_only_line(stripped):
+        return True
+    segments = [s.strip() for s in stripped.split("|") if s.strip()]
+    if not segments:
+        return False
+    return all(
+        _is_project_metadata_token(seg) or _is_link_only_line(seg) for seg in segments
+    )
 
 
 def _split_project_blocks(section_text: str) -> list[str]:
@@ -880,9 +1183,13 @@ def _split_project_blocks(section_text: str) -> list[str]:
         for line in lines:
             stripped = line.strip()
             is_bullet = stripped.startswith("- ")
-            is_link_only = _is_link_only_line(stripped)
+            is_link_only = _is_metadata_only_line(stripped)
             is_title_like = (
-                not is_bullet and not is_link_only and stripped and len(stripped) <= 100
+                not is_bullet
+                and not is_link_only
+                and stripped
+                and len(stripped) <= 100
+                and stripped[0].isupper()
             )
 
             if prev_was_bullet and is_title_like and sub_blocks[-1]:
@@ -942,6 +1249,7 @@ def _extract_projects(section_text: str) -> list[ProjectEntry]:
     - Technologies (inline on the title line, and/or a "Technologies:" /
       "Tech:" / "Stack:" line — merged and deduplicated)
     - URL (any http/https URL found in the block)
+    - Links (link labels like GitHub/Live Demo/Video Demo, with no invented URLs)
     """
     if not section_text:
         return []
@@ -976,11 +1284,15 @@ def _extract_projects(section_text: str) -> list[ProjectEntry]:
         # Technologies — merge inline (from the title line) with an explicit
         # "Technologies:" / "Tech:" / "Stack:" line if one exists, dedup
         # while preserving first-seen order.
-        technologies: list[str] = list(_extract_skills(inline_rest)) if inline_rest else []
+        technologies: list[str] = [
+            t for t in _extract_skills(inline_rest) if not _is_project_metadata_token(t)
+        ] if inline_rest else []
         for line in lines[1:]:
             if _PROJECT_TECH_SECTION_RE.search(line):
                 after = _PROJECT_TECH_SECTION_RE.sub("", line).strip()
                 for tech in _extract_skills(after):
+                    if _is_project_metadata_token(tech):
+                        continue
                     if tech.lower() not in {t.lower() for t in technologies}:
                         technologies.append(tech)
                 break
@@ -991,7 +1303,7 @@ def _extract_projects(section_text: str) -> list[ProjectEntry]:
         for line in lines[1:]:
             if _PROJECT_TECH_SECTION_RE.search(line):
                 continue
-            if _is_link_only_line(line):
+            if _is_metadata_only_line(line):
                 continue
             if line.startswith("- "):
                 description_lines.append(line[2:].strip())
@@ -999,12 +1311,20 @@ def _extract_projects(section_text: str) -> list[ProjectEntry]:
                 description_lines.append(line)
         description = " ".join(description_lines[:3]).strip() or None
 
+        # Link labels (GitHub / Live Demo / Video Demo / etc.) — recorded
+        # without inventing URLs (Issue 4). Scanned over the block body
+        # only (excluding the title line), so a project literally named
+        # something like "Portfolio Website" doesn't get spurious labels
+        # pulled from its own name.
+        links = _extract_project_links("\n".join(lines[1:]))
+
         entries.append(
             ProjectEntry(
                 name=name,
                 description=description,
                 technologies=technologies,
                 url=url,
+                links=links,
                 raw=block[:400],
             )
         )
@@ -1104,6 +1424,34 @@ _PUB_SIGNAL_RE = re.compile(
 )
 
 
+# Matches ONLY an explicit author label line — "Authors:", "Author:", or
+# "By:" — followed by one or more names. Deliberately does NOT match
+# generic prose or metadata lines (page numbers, volume/issue, DOI,
+# journal name, year), so those can never be mistaken for an author list.
+_AUTHOR_LINE_RE = re.compile(r"^\s*(?:authors?|by)\s*:\s*(.+)$", re.IGNORECASE)
+
+
+def _extract_publication_authors(block_lines: list[str]) -> list[str]:
+    """
+    Extracts authors from a publication block ONLY when an explicit
+    "Authors:" / "Author:" / "By:" line is present. Never infers authors
+    from surrounding publication metadata (page numbers like "Page 284",
+    volume/issue like "Volume 13, Issue 1", DOI, journal/venue name, or
+    year) — if no explicit author line exists, returns [] rather than
+    guessing.
+    """
+    for line in block_lines:
+        match = _AUTHOR_LINE_RE.match(line)
+        if not match:
+            continue
+        raw = match.group(1).strip()
+        if not raw:
+            return []
+        parts = re.split(r",|\s+and\s+|&", raw, flags=re.IGNORECASE)
+        return [p.strip() for p in parts if p.strip()]
+    return []
+
+
 def _extract_publications(full_text: str) -> list[PublicationEntry]:
     """
     Publications rarely appear in the five standard parser sections, so we
@@ -1114,7 +1462,7 @@ def _extract_publications(full_text: str) -> list[PublicationEntry]:
     - Title (first sentence / line of the block)
     - Venue (journal / conference name via keyword match)
     - Year
-    - Authors (names before the title if the block starts with an author list)
+    - Authors (ONLY from an explicit "Authors:"/"Author:"/"By:" line — never inferred from metadata)
     - DOI
     """
     # Find a publications-like header
@@ -1132,7 +1480,7 @@ def _extract_publications(full_text: str) -> list[PublicationEntry]:
     # Collect lines until the next likely section header
     _OTHER_HEADER_RE = re.compile(
         r"^(education|experience|skills|projects?|certifications?|"
-        r"awards?|hobbies?|interests?|references?|summary|objective)$",
+        r"awards?|achievements?|honou?rs?|hobbies?|interests?|references?|summary|objective)$",
         re.IGNORECASE,
     )
     pub_lines: list[str] = []
@@ -1173,9 +1521,14 @@ def _extract_publications(full_text: str) -> list[PublicationEntry]:
                 venue = _strip_trailing_noise(line)
                 break
 
-        # Authors — spaCy PERSON entities in first 200 chars
-        doc = _NLP(block[:200])
-        authors = list({ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON"})
+        # Authors — ONLY from an explicit "Authors:" / "Author:" / "By:"
+        # line. Previously this used spaCy PERSON NER over the first 200
+        # characters of the block, which happily mis-tagged publication
+        # metadata like "Page 284" as a person's name. Metadata lines
+        # (page/volume/issue numbers, DOI, journal name, year) must never
+        # be treated as authors — if no explicit author line exists, the
+        # correct result is an empty list, not a guess.
+        authors = _extract_publication_authors(block_lines)
 
         entries.append(
             PublicationEntry(
