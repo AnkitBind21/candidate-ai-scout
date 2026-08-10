@@ -16,7 +16,7 @@ The platform reduces manual resume screening by comparing candidate skills, expe
 ### Dashboard
 
 <p align="center">
-  <img src="./screenshots/dashboard.png" alt="Candidate AI Scout Dashboard" width="1000">
+  <img src="./Screenshots/Dashboard.png" alt="Candidate AI Scout Dashboard" width="1000">
 </p>
 
 
@@ -24,14 +24,20 @@ The platform reduces manual resume screening by comparing candidate skills, expe
 ### Candidate Profile
 
 <p align="center">
-  <img src="./screenshots/candidate.png" alt="Candidate Profile" width="1000">
+  <img src="./Screenshots/Candidates.png" alt="Candidate Profile" width="1000">
 </p>
 
 
 ### Match Analysis
 
 <p align="center">
-  <img src="./screenshots/analysis.png" alt="Match Analysis" width="1000">
+  <img src="./Screenshots/Analysis.png" alt="Match Analysis" width="1000">
+</p>
+
+### Jobs
+
+<p align="center">
+  <img src="./Screenshots/Jobs.png" alt="Match Analysis" width="1000">
 </p>
 
 ## Features
